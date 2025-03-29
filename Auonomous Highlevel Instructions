@@ -1,0 +1,178 @@
+##Highlevel Instructions - this is aimed a guide and NOT a detailed walk through. 
+
+# 🧠 Autonomous Document Classification – High-Level Setup Documentation
+
+This guide outlines the high-level steps to set up an AI-powered, automated document classification system using Microsoft Copilot Studio, Power Automate, SharePoint, and Microsoft Purview. It enables documents to be automatically labeled based on their content, with metadata updates and compliance labeling via Purview.
+
+## 🔹 1. General Instructions (Agent Guidance)
+
+Defines how the AI agent interprets content and returns classification.
+
+**Purpose:** The agent determines the appropriate sensitivity label based on document content, following a Knowledge Source containing classification policy.
+
+**Labels:**
+- Personal
+- Public
+- General
+- Confidential
+- Highly Confidential
+
+**Decision Criteria:**
+- Does the content include personal data or regulated information?
+- Who is the intended audience?
+- Could disclosure cause legal, financial, or reputational harm?
+
+**Expected Output:**
+- Classification_Label: One of the labels above.
+- Brief_Explanation: A short rationale (1–2 sentences).
+
+**Restrictions:**
+- Do not quote internal policy documents.
+- Do not speculate or over-explain.
+- Do not output uncertain or placeholder values.
+
+## 🔹 2. Action Instructions (HTTP Request to SharePoint)
+
+Defines how and when the agent triggers metadata updates.
+
+**When to Trigger:**
+- A classification label has been selected.
+- The server-relative file path is available.
+- The SharePoint library contains a column called AISensitivity.
+
+**Request Configuration:**
+- Method: POST
+- URI:
+```
+_api/web/GetFileByServerRelativeUrl('OriginalDocumentPath')/ListItemAllFields
+```
+(Note: OriginalDocumentPath must begin with / and be wrapped in single quotes.)
+
+**Headers:**
+```
+Accept: application/json;odata=verbose
+Content-Type: application/json;odata=verbose
+IF-MATCH: *
+X-HTTP-Method: MERGE
+```
+
+**Body:**
+```json
+{
+  "__metadata": { "type": "SP.Data.Shared_x0020_DocumentsItem" },
+  "AISensitivity": "Classification_Label"
+}
+```
+
+## 🔹 3. SharePoint Document Library Setup
+
+Prepares SharePoint to support AI-driven classification.
+
+**Create Custom Column:**
+- Column Name: AISensitivity
+- Type: Single line of text (or managed metadata, if preferred)
+
+**Permissions:**
+- Ensure the Copilot Studio agent (via HTTP connector or service principal) has permission to update metadata in the library.
+
+**Content:**
+- Documents must be stored in a library with a predictable path such as /Shared Documents/.
+
+## 🔹 4. Power Automate Flow (Trigger and Processing)
+
+Sets up automation logic to detect changes, classify content, and apply labels.
+
+**Trigger:**
+- When a file is created or modified (properties only) (polling-based trigger)
+- Frequency: Adjust to hourly or daily depending on volume (default is 1 min)
+
+**Double-Trigger Prevention:**
+- Add a condition step at the start:
+```
+If AISensitivity is empty
+```
+This ensures files are only processed if they haven't already been classified.
+
+**Expression (Power Automate condition):**
+```
+@empty(triggerOutputs()?['body/AISensitivity'])
+```
+
+**Content Extraction:**
+- Primary: Use "Get File Content" and built-in file parsers or OCR.
+- Alternative: Use Graph API to retrieve raw document content:
+```
+GET /drives/{drive-id}/items/{item-id}/content?format={format}
+```
+Graph Docs →
+
+**Send to GPT Agent:**
+- Pass the full text into Copilot Studio with the classification instructions.
+- Capture the label and rationale.
+
+**HTTP Request Action:**
+- Dynamically inject the label and server-relative path into the HTTP request.
+- POST the metadata update back into SharePoint using the action instructions above.
+
+## 🔹 5. Copilot Studio Agent Setup
+
+Configure the classification logic within Microsoft Copilot Studio.
+
+**General Instructions:** Guide how to interpret document content and apply labels.
+
+**Knowledge Source:** Upload a "Document Classification Scheme" file with policy details.
+
+**Agent Outputs:**
+- Label (e.g., Confidential)
+- Reason for label
+
+**Action Configuration:**
+- Trigger HTTP request only when:
+  - A label is confidently selected
+  - File path is available
+
+## 🔹 6. Microsoft Purview Sensitivity Label Integration
+
+Use Microsoft Purview to enforce real sensitivity labels based on the SharePoint metadata.
+
+**Auto-Label Policy:**
+- Create a rule using document property matching:
+```
+Document property is: AISensitivity:Confidential
+```
+- Add one rule per classification level if needed.
+
+**Managed Property Mapping:**
+- Search Schema: Map the ows_AISensitivity crawled property to a managed property (e.g., RefinableString01).
+- Make it queryable, searchable, and retrievable.
+
+**Simulation & Enforcement:**
+- Use simulation mode to test matches before publishing auto-labeling policies.
+- Publish the policy to activate automatic labeling.
+
+## 🔹 7. Testing & Validation
+
+Ensure the system is working as expected before full rollout.
+
+**Upload sample documents and verify:**
+- Flow is triggered correctly.
+- Agent returns appropriate classification.
+- HTTP request updates SharePoint metadata.
+- Microsoft Purview detects and applies correct label via auto-labeling.
+
+## 🔹 8. Optional Enhancements & Governance
+
+- **Audit Logging:** Save label outcomes to a SharePoint list or logging service.
+- **Review Loop:** Add a manual override field (e.g., CorrectedSensitivity) to track feedback.
+- **Security Separation:** Ensure flow, Copilot, and Purview permissions are scoped properly.
+- **File Type Filtering:** Only classify supported formats (e.g., .docx, .pdf).
+
+## ✅ Final Outcome
+
+Documents are automatically:
+- Triggered when added or changed
+- Read and classified by an AI agent
+- Tagged with metadata in SharePoint
+- Detected by Purview policies for official sensitivity labeling
+
+This creates a self-sustaining, scalable classification system across Microsoft 365.

@@ -57,3 +57,47 @@ Classification_Label = Public
 Brief_Explanation = The content is intended for public release and contains no confidential material.
 
 Answer grouping data which has a tag [Authoritative] with a header line containing a tick followed by Based on official sources. Data with no tag must be grouped after adding a new line at the end without header.
+
+
+
+
+
+=========================================================================================
+ACTION INSTUCTIONS
+=========================================================================================
+Action Connector:  SharePoint - Send an HTTP request to SharePoint
+
+##Action Instructions to be used in the Action itself:
+
+Update SharePoint document metadata with the selected classification label using an HTTP request.
+
+WHEN TO USE:
+
+A classification label has been selected
+
+The full server-relative file path is available (starts with / and includes library + filename)
+
+The document library contains a column named AISensitivity
+
+FIELDS TO SET:
+Method = POST
+URI = _api/web/GetFileByServerRelativeUrl('OriginalDocumentPath')/ListItemAllFields
+Example = _api/web/GetFileByServerRelativeUrl('/Shared Documents/Example.docx')/ListItemAllFields
+Headers =
+{
+Accept = application/json;odata=verbose,
+Content-Type = application/json;odata=verbose,
+IF-MATCH = *,
+X-HTTP-Method = MERGE
+}
+Body =
+{
+__metadata: { type = SP.Data.Shared_x0020_DocumentsItem },
+AISensitivity: Classification_Label
+}
+
+NOTES:
+
+The file path must be wrapped in single quotes
+
+The classification label must exactly match one of the allowed values

@@ -176,3 +176,202 @@ Documents are automatically:
 - Detected by Purview policies for official sensitivity labeling
 
 This creates a self-sustaining, scalable classification system across Microsoft 365.
+
+
+
+
+
+======================================================================================
+
+FLOW INSTRUCTIONS
+
+======================================================================================
+
+🚀 Detailed Power Automate Flow Setup Guide
+This guide describes how to set up the Power Automate Flow for automatically triggering an autonomous document classification agent.
+
+Step-by-Step Flow Configuration
+Step 1: Trigger - SharePoint
+Action: "When a file is created or modified (properties only)"
+
+Purpose: Starts the flow when a document is added or updated in SharePoint.
+
+Configuration:
+
+Set your Site Address.
+
+Choose your Document Library.
+
+Step 2: Initialize Variable - FilePathVariable
+Action: "Initialize variable"
+
+Purpose: Store the file path for later use.
+
+Configuration:
+
+Name: FilePathVariable
+
+Type: String
+
+Value: Dynamically set from Trigger (file path).
+
+Step 3: Initialize Variable - FileIdentifierVariable
+Action: "Initialize variable"
+
+Purpose: Store the file ID or identifier for referencing the document later.
+
+Configuration:
+
+Name: FileIdentifierVariable
+
+Type: String
+
+Value: Dynamically set from Trigger (file identifier).
+
+✅ Extract Document Text Content
+Step 4: Get file content
+Action: "Get file content" (SharePoint)
+
+Purpose: Retrieve the file content from SharePoint.
+
+Configuration:
+
+Site Address: your SharePoint URL
+
+File Identifier: Use dynamic value from FileIdentifierVariable.
+
+Step 5: Create file (OneDrive)
+Action: "Create file" (OneDrive)
+
+Purpose: Temporarily store the document content for text extraction.
+
+Configuration:
+
+Folder Path: e.g., /Temp
+
+File Name: Dynamic (original filename)
+
+File Content: from "Get file content" step.
+
+Step 6: Convert file (OneDrive)
+Action: "Convert file"
+
+Purpose: Converts file to a compatible format for OCR (e.g., PDF).
+
+Configuration:
+
+File: Select from "Create file" action.
+
+Target Type: PDF.
+
+Step 7: Delete file (OneDrive)
+Action: "Delete file"
+
+Purpose: Removes the temporary file from OneDrive storage after conversion.
+
+Configuration:
+
+File: Original file from "Create file" step.
+
+Step 8: Recognize text in image or PDF (OCR - AI Builder)
+Action: "Recognize text in an image or a PDF document"
+
+Purpose: Extract text from PDF document using OCR.
+
+Configuration:
+
+Document type: PDF
+
+File Content: Output from "Convert file" step.
+
+🔹 Call GenAI / GPT for Document Classification
+Step 9: Create text with GPT using a prompt
+Action: "Create text with GPT using a prompt"
+
+Purpose: Use GPT (via Copilot Studio) to classify document based on extracted text.
+
+Configuration:
+
+Provide clear instructions for GPT to classify the document.
+
+Insert the extracted text as input.
+
+Step 10: Send a prompt to the specified Copilot for processing
+Action: "Sends a prompt to Copilot"
+
+Purpose: Passes the classification task to your custom-trained Copilot Agent.
+
+Configuration:
+
+Use the Copilot Agent you created earlier.
+
+Pass the text from GPT step to Copilot for final classification decision.
+
+🔹 Final Metadata Update (HTTP to SharePoint)
+Step 11: Send an HTTP request to SharePoint
+Action: "Send an HTTP request to SharePoint"
+
+Purpose: Update SharePoint metadata with the determined sensitivity label.
+
+Configuration:
+
+Site Address: Your SharePoint URL
+
+Method: POST
+
+URI:
+
+bash
+Copy
+Edit
+_api/web/GetFileByServerRelativeUrl('[FilePathVariable]')/ListItemAllFields
+Headers:
+
+json
+Copy
+Edit
+{
+  "Accept": "application/json;odata=verbose",
+  "Content-Type": "application/json;odata=verbose",
+  "IF-MATCH": "*",
+  "X-HTTP-Method": "MERGE"
+}
+Body:
+
+json
+Copy
+Edit
+{
+  "__metadata": {
+    "type": "SP.Data.Shared_x0020_DocumentsItem"
+  },
+  "AISensitivity": "[classification_label_from_copilot]"
+}
+⚠ Important: Preventing Double-Triggers
+To avoid continuous re-triggering:
+
+Add a condition after the initial trigger action:
+
+Condition expression:
+
+scss
+Copy
+Edit
+empty(triggerOutputs()?['body/AISensitivity'])
+If true (AISensitivity is empty): Continue flow.
+
+If false: Terminate flow immediately to prevent redundant processing.
+
+🎉 Final Result: Your Power Automate flow is now fully configured and will autonomously:
+
+Detect document creation/modification.
+
+Extract text content reliably (OCR or Graph API as alternative).
+
+Classify documents accurately using GPT & Copilot Studio.
+
+Update metadata in SharePoint with sensitivity labels automatically.
+
+Avoid redundant execution due to double-trigger prevention.
+
+This autonomous process ensures documents within your organization are consistently and correctly classified, significantly reducing manual effort and improving compliance.

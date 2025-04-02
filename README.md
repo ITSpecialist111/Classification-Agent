@@ -1,4 +1,397 @@
 # Classification-Agent
+
+##Highlevel Instructions - this is aimed a guide and NOT a detailed walk through. 
+
+# 🧠 Autonomous Document Classification – High-Level Setup Documentation
+
+This guide outlines the high-level steps to set up an AI-powered, automated document classification system using Microsoft Copilot Studio, Power Automate, SharePoint, and Microsoft Purview. It enables documents to be automatically labeled based on their content, with metadata updates and compliance labeling via Purview.
+
+## 🔹 1. General Instructions (Agent Guidance)
+
+Defines how the AI agent interprets content and returns classification.
+
+**Purpose:** The agent determines the appropriate sensitivity label based on document content, following a Knowledge Source containing classification policy.
+
+**Labels:**
+- Personal
+- Public
+- General
+- Confidential
+- Highly Confidential
+
+**Decision Criteria:**
+- Does the content include personal data or regulated information?
+- Who is the intended audience?
+- Could disclosure cause legal, financial, or reputational harm?
+
+**Expected Output:**
+- Classification_Label: One of the labels above.
+- Brief_Explanation: A short rationale (1–2 sentences).
+
+**Restrictions:**
+- Do not quote internal policy documents.
+- Do not speculate or over-explain.
+- Do not output uncertain or placeholder values.
+
+## 🔹 2. Action Instructions (HTTP Request to SharePoint)
+
+Defines how and when the agent triggers metadata updates.
+
+**When to Trigger:**
+- A classification label has been selected.
+- The server-relative file path is available.
+- The SharePoint library contains a column called AISensitivity.
+
+**Request Configuration:**
+- Method: POST
+- URI:
+```
+_api/web/GetFileByServerRelativeUrl('OriginalDocumentPath')/ListItemAllFields
+```
+(Note: OriginalDocumentPath must begin with / and be wrapped in single quotes.)
+
+**Headers:**
+```
+Accept: application/json;odata=verbose
+Content-Type: application/json;odata=verbose
+IF-MATCH: *
+X-HTTP-Method: MERGE
+```
+
+**Body:**
+```json
+{
+  "__metadata": { "type": "SP.Data.Shared_x0020_DocumentsItem" },
+  "AISensitivity": "Classification_Label"
+}
+```
+
+## 🔹 3. SharePoint Document Library Setup
+
+Prepares SharePoint to support AI-driven classification.
+
+**Create Custom Column:**
+- Column Name: AISensitivity
+- Type: Single line of text (or managed metadata, if preferred)
+
+**Permissions:**
+- Ensure the Copilot Studio agent (via HTTP connector or service principal) has permission to update metadata in the library.
+
+**Content:**
+- Documents must be stored in a library with a predictable path such as /Shared Documents/.
+
+## 🔹 4. Power Automate Flow (Trigger and Processing)
+
+Sets up automation logic to detect changes, classify content, and apply labels.
+
+**Trigger:**
+- When a file is created or modified (properties only) (polling-based trigger)
+- Frequency: Adjust to hourly or daily depending on volume (default is 1 min)
+
+**Double-Trigger Prevention:**
+- Add a condition step at the start:
+```
+If AISensitivity is empty
+```
+This ensures files are only processed if they haven't already been classified.
+
+**Expression (Power Automate condition):**
+```
+@empty(triggerOutputs()?['body/AISensitivity'])
+```
+
+**Content Extraction:**
+- Primary: Use "Get File Content" and built-in file parsers or OCR.
+- Alternative: Use Graph API to retrieve raw document content:
+```
+GET /drives/{drive-id}/items/{item-id}/content?format={format}
+```
+Graph Docs →
+
+**Send to GPT Agent:**
+- Pass the full text into Copilot Studio with the classification instructions.
+- Capture the label and rationale.
+
+**HTTP Request Action:**
+- Dynamically inject the label and server-relative path into the HTTP request.
+- POST the metadata update back into SharePoint using the action instructions above.
+
+## 🔹 5. Copilot Studio Agent Setup
+
+Configure the classification logic within Microsoft Copilot Studio.
+
+**General Instructions:** Guide how to interpret document content and apply labels.
+
+**Knowledge Source:** Upload a "Document Classification Scheme" file with policy details.
+
+**Agent Outputs:**
+- Label (e.g., Confidential)
+- Reason for label
+
+**Action Configuration:**
+- Trigger HTTP request only when:
+  - A label is confidently selected
+  - File path is available
+
+## 🔹 6. Microsoft Purview Sensitivity Label Integration
+
+Use Microsoft Purview to enforce real sensitivity labels based on the SharePoint metadata.
+
+**Auto-Label Policy:**
+- Create a rule using document property matching:
+```
+Document property is: AISensitivity:Confidential
+```
+- Add one rule per classification level if needed.
+
+**Managed Property Mapping:**
+- Search Schema: Map the ows_AISensitivity crawled property to a managed property (e.g., RefinableString01).
+- Make it queryable, searchable, and retrievable.
+
+**Simulation & Enforcement:**
+- Use simulation mode to test matches before publishing auto-labeling policies.
+- Publish the policy to activate automatic labeling.
+
+## 🔹 7. Testing & Validation
+
+Ensure the system is working as expected before full rollout.
+
+**Upload sample documents and verify:**
+- Flow is triggered correctly.
+- Agent returns appropriate classification.
+- HTTP request updates SharePoint metadata.
+- Microsoft Purview detects and applies correct label via auto-labeling.
+
+## 🔹 8. Optional Enhancements & Governance
+
+- **Audit Logging:** Save label outcomes to a SharePoint list or logging service.
+- **Review Loop:** Add a manual override field (e.g., CorrectedSensitivity) to track feedback.
+- **Security Separation:** Ensure flow, Copilot, and Purview permissions are scoped properly.
+- **File Type Filtering:** Only classify supported formats (e.g., .docx, .pdf).
+
+## ✅ Final Outcome
+
+Documents are automatically:
+- Triggered when added or changed
+- Read and classified by an AI agent
+- Tagged with metadata in SharePoint
+- Detected by Purview policies for official sensitivity labeling
+
+This creates a self-sustaining, scalable classification system across Microsoft 365.
+
+
+
+
+
+======================================================================================
+
+FLOW INSTRUCTIONS
+
+======================================================================================
+
+🚀 Detailed Power Automate Flow Setup Guide
+This guide describes how to set up the Power Automate Flow for automatically triggering an autonomous document classification agent.
+
+Step-by-Step Flow Configuration
+Step 1: Trigger - SharePoint
+Action: "When a file is created or modified (properties only)"
+
+Purpose: Starts the flow when a document is added or updated in SharePoint.
+
+Configuration:
+
+Set your Site Address.
+
+Choose your Document Library.
+
+Step 2: Initialize Variable - FilePathVariable
+Action: "Initialize variable"
+
+Purpose: Store the file path for later use.
+
+Configuration:
+
+Name: FilePathVariable
+
+Type: String
+
+Value: Dynamically set from Trigger (file path).
+
+Step 3: Initialize Variable - FileIdentifierVariable
+Action: "Initialize variable"
+
+Purpose: Store the file ID or identifier for referencing the document later.
+
+Configuration:
+
+Name: FileIdentifierVariable
+
+Type: String
+
+Value: Dynamically set from Trigger (file identifier).
+
+✅ Extract Document Text Content
+Step 4: Get file content
+Action: "Get file content" (SharePoint)
+
+Purpose: Retrieve the file content from SharePoint.
+
+Configuration:
+
+Site Address: your SharePoint URL
+
+File Identifier: Use dynamic value from FileIdentifierVariable.
+
+Step 5: Create file (OneDrive)
+Action: "Create file" (OneDrive)
+
+Purpose: Temporarily store the document content for text extraction.
+
+Configuration:
+
+Folder Path: e.g., /Temp
+
+File Name: Dynamic (original filename)
+
+File Content: from "Get file content" step.
+
+Step 6: Convert file (OneDrive)
+Action: "Convert file"
+
+Purpose: Converts file to a compatible format for OCR (e.g., PDF).
+
+Configuration:
+
+File: Select from "Create file" action.
+
+Target Type: PDF.
+
+Step 7: Delete file (OneDrive)
+Action: "Delete file"
+
+Purpose: Removes the temporary file from OneDrive storage after conversion.
+
+Configuration:
+
+File: Original file from "Create file" step.
+
+Step 8: Recognize text in image or PDF (OCR - AI Builder)
+Action: "Recognize text in an image or a PDF document"
+
+Purpose: Extract text from PDF document using OCR.
+
+Configuration:
+
+Document type: PDF
+
+File Content: Output from "Convert file" step.
+
+🔹 Call GenAI / GPT for Document Classification
+Step 9: Create text with GPT using a prompt
+Action: "Create text with GPT using a prompt"
+
+Purpose: Use GPT (via Copilot Studio) to classify document based on extracted text.
+
+Configuration:
+
+Provide clear instructions for GPT to classify the document.
+
+Insert the extracted text as input.
+
+Step 10: Send a prompt to the specified Copilot for processing
+Action: "Sends a prompt to Copilot"
+
+Purpose: Passes the classification task to your custom-trained Copilot Agent.
+
+Configuration:
+
+Use the Copilot Agent you created earlier.
+
+Pass the text from GPT step to Copilot for final classification decision.
+
+🔹 Final Metadata Update (HTTP to SharePoint)
+Step 11: Send an HTTP request to SharePoint
+Action: "Send an HTTP request to SharePoint"
+
+Purpose: Update SharePoint metadata with the determined sensitivity label.
+
+Configuration:
+
+Site Address: Your SharePoint URL
+
+Method: POST
+
+URI:
+
+bash
+Copy
+Edit
+_api/web/GetFileByServerRelativeUrl('[FilePathVariable]')/ListItemAllFields
+Headers:
+
+json
+Copy
+Edit
+{
+  "Accept": "application/json;odata=verbose",
+  "Content-Type": "application/json;odata=verbose",
+  "IF-MATCH": "*",
+  "X-HTTP-Method": "MERGE"
+}
+Body:
+
+json
+Copy
+Edit
+{
+  "__metadata": {
+    "type": "SP.Data.Shared_x0020_DocumentsItem"
+  },
+  "AISensitivity": "[classification_label_from_copilot]"
+}
+⚠ Important: Preventing Double-Triggers
+To avoid continuous re-triggering:
+
+Add a condition after the initial trigger action:
+
+Condition expression:
+
+scss
+Copy
+Edit
+empty(triggerOutputs()?['body/AISensitivity'])
+If true (AISensitivity is empty): Continue flow.
+
+If false: Terminate flow immediately to prevent redundant processing.
+
+🎉 Final Result: Your Power Automate flow is now fully configured and will autonomously:
+
+Detect document creation/modification.
+
+Extract text content reliably (OCR or Graph API as alternative).
+
+Classify documents accurately using GPT & Copilot Studio.
+
+Update metadata in SharePoint with sensitivity labels automatically.
+
+Avoid redundant execution due to double-trigger prevention.
+
+This autonomous process ensures documents within your organization are consistently and correctly classified, significantly reducing manual effort and improving compliance.
+
+
+
+
+
+
+
+
+
+
+=======================================================================================
+OLDER INSTRUCTIONS FOR END USER AGENT - NOT FOR AUTONOMOUS
+=======================================================================================
+
+
 Custom Instructions for Classification Agent
 
 
